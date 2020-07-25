@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.13)
+set(CMAKE_VERBOSE_MAKEFILE on)
+project(example)
+include_directories(src/)
+add_executable(test example/test.cc)
