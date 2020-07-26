@@ -24,12 +24,12 @@ int main(int argc, char *argv[])
 {
   std::shared_ptr<Test> t(new Test);
 
-  sigslot::signal<Test> sig;
+  sigslot::Signal<Test> sig;
   sig.connect(t, &Test::run);
   sig.connect(t, &Test::run2);
   sig.invoke();
 
-  sigslot::signal<Test, int> sig2;
+  sigslot::Signal<Test, int> sig2;
   sig2.connect(t, &Test::run3);
   sig2.invoke(100);
 

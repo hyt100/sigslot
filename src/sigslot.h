@@ -8,6 +8,7 @@
 
 namespace sigslot {
 
+namespace detail {
 template<typename CLASS, typename... ARGS>
 class WeakCallback
 {
@@ -50,19 +51,21 @@ WeakCallback<CLASS, ARGS...> makeWeakCallback(const std::shared_ptr<CLASS>& obje
   return WeakCallback<CLASS, ARGS...>(object, function);
 }
 
+} //namespace detail
+
 template<typename CLASS, typename... ARGS>
-class signal
+class Signal
 {
  public:
-  signal() {}
-  ~signal()
+  Signal() {}
+  ~Signal()
   {
     weakCallbackList_.clear();
   }
 
   void connect(const std::shared_ptr<CLASS>& object, void (CLASS::*function)(ARGS...))
   {
-    weakCallbackList_.push_back(makeWeakCallback(object, function));
+    weakCallbackList_.push_back(detail::makeWeakCallback(object, function));
   }
 
   void invoke(ARGS&&... args)
@@ -74,7 +77,7 @@ class signal
   }
   
  private:
-  std::list<WeakCallback<CLASS, ARGS...>> weakCallbackList_;
+  std::list<detail::WeakCallback<CLASS, ARGS...>> weakCallbackList_;
 };
 
 
