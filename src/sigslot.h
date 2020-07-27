@@ -9,75 +9,112 @@
 namespace sigslot {
 
 namespace detail {
-template<typename CLASS, typename... ARGS>
-class WeakCallback
+
+template<typename Callback>
+class SignalCommon
 {
  public:
+  typedef std::list<Callback> CB_LIST;
 
-  WeakCallback(const std::weak_ptr<CLASS>& object,
-               const std::function<void (CLASS*, ARGS...)>& function)
-    : object_(object), function_(function)
+  SignalCommon()
+    :slot_list_(new CB_LIST)
+  {}
+
+  void copyOnWrite()
   {
-  }
-
-  // Default dtor, copy ctor and assignment are okay
-
-  void operator()(ARGS&&... args) const
-  {
-    std::shared_ptr<CLASS> ptr(object_.lock());
-    if (ptr)
+    if (!slot_list_.unique())
     {
-      function_(ptr.get(), std::forward<ARGS>(args)...);
+      slot_list_.reset(new CB_LIST(*slot_list_));
     }
   }
 
- private:
-
-  std::weak_ptr<CLASS> object_;
-  std::function<void (CLASS*, ARGS...)> function_;
+ public:
+  std::shared_ptr<CB_LIST> slot_list_;
+  std::mutex mutex_;
 };
-
-template<typename CLASS, typename... ARGS>
-WeakCallback<CLASS, ARGS...> makeWeakCallback(const std::shared_ptr<CLASS>& object,
-                                              void (CLASS::*function)(ARGS...))
-{
-  return WeakCallback<CLASS, ARGS...>(object, function);
-}
-
-template<typename CLASS, typename... ARGS>
-WeakCallback<CLASS, ARGS...> makeWeakCallback(const std::shared_ptr<CLASS>& object,
-                                              void (CLASS::*function)(ARGS...) const)
-{
-  return WeakCallback<CLASS, ARGS...>(object, function);
-}
 
 } //namespace detail
 
-template<typename CLASS, typename... ARGS>
+template<typename... ARGS>
 class Signal
 {
  public:
-  Signal() {}
+  typedef std::function<void(ARGS...)> Callback;
+  typedef detail::SignalCommon<Callback> SignalCommonType;
+
+  Signal()
+    :com_(new SignalCommonType)
+  {}
   ~Signal()
+  {}
+
+  void connect(Callback f)
   {
-    weakCallbackList_.clear();
+    add(f);
   }
 
-  void connect(const std::shared_ptr<CLASS>& object, void (CLASS::*function)(ARGS...))
+  template<typename CLASS>
+  void connect(void (CLASS::*function)(ARGS...), std::shared_ptr<CLASS>& object)
   {
-    weakCallbackList_.push_back(detail::makeWeakCallback(object, function));
+    std::weak_ptr<CLASS> weak_obj = object;
+    auto f = [=] (ARGS&&... args) mutable -> void {
+        std::shared_ptr<CLASS> ptr(weak_obj.lock());
+        if (ptr)
+        {
+          ((ptr.get())->*function)(std::forward<ARGS>(args)...);
+        }
+    };
+    add(f);
+  }
+
+  template<typename CLASS>
+  void connect(void (CLASS::*function)(ARGS...) const, std::shared_ptr<CLASS>& object)
+  {
+    std::weak_ptr<CLASS> weak_obj = object;
+    auto f = [=] (ARGS&&... args) mutable -> void {
+        std::shared_ptr<CLASS> ptr(weak_obj.lock());
+        if (ptr)
+        {
+          ((ptr.get())->*function)(std::forward<ARGS>(args)...);
+        }
+    };
+    add(f);
   }
 
   void invoke(ARGS&&... args)
   {
-    for (auto &cb : weakCallbackList_)
+    SignalCommonType& com(*com_);
+    std::shared_ptr<typename SignalCommonType::CB_LIST> slot_list;
     {
-        cb(std::forward<ARGS>(args)...);
+      std::lock_guard<std::mutex> lock(com.mutex_);
+      slot_list = com.slot_list_;
+    }
+
+    typename SignalCommonType::CB_LIST& cb_list(*slot_list);
+    for (auto &cb: cb_list)
+    {
+      cb(std::forward<ARGS>(args)...);
+    }
+  }
+
+  void operator()(ARGS&&... args)
+  {
+    invoke(std::forward<ARGS>(args)...);
+  }
+
+ private:
+  void add(Callback f)
+  {
+    SignalCommonType& com(*com_);
+    {
+      std::lock_guard<std::mutex> lock(com.mutex_);
+      com.copyOnWrite();
+      com.slot_list_->push_back(f);
     }
   }
   
  private:
-  std::list<detail::WeakCallback<CLASS, ARGS...>> weakCallbackList_;
+  std::shared_ptr<SignalCommonType> com_;
 };
 
 
